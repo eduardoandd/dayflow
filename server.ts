@@ -1,9 +1,10 @@
 
 import express from 'express';
 import cors from 'cors';
+import dayflowRouter from './src/routes/dayflowRouter';
+import dotenv from 'dotenv';
 
-
-
+dotenv.config();
 const app = express();
 const PORT = 3030;
 
@@ -11,8 +12,7 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-
-
+app.use('/api',dayflowRouter)
 
 
 async function startServer() {
