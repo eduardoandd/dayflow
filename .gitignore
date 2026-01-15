@@ -1,4 +1,5 @@
 node_modules/
 dist/
 .env
-./src/utils/auth/*.json
+src/utils/auth/token.json
+src/utils/auth/oauth_secret.json

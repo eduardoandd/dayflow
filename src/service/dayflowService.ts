@@ -1,10 +1,11 @@
-import { createAgent, tool } from 'langchain'
+import { createAgent, humanInTheLoopMiddleware, tool } from 'langchain'
 import { fastModel } from '../utils/models'
 import { z } from 'zod'
 import { content } from 'pdfkit/js/page'
 import { JsonOutputParser } from "@langchain/core/output_parsers";
 import { getAuthClient } from '../utils/google0auth2';
 import { google } from 'googleapis';
+import { Command, MemorySaver } from '@langchain/langgraph';
 
 // Função auxiliar melhorada para codificação e HTML
 const createEmailBody = (to: string[], subject: string, htmlBody: string, cc: string[] = []) => {
@@ -221,7 +222,13 @@ export const dayflowService = async (pedido: string) => {
 
             Sempre confirme o que foi agendado em sua resposta final.
             Informações importantes: HOJE É ${today}
-        `.trim()
+        `.trim(),
+        middleware: [
+            humanInTheLoopMiddleware    ({
+                interruptOn: {create_calendar_event: true},
+                descriptionPrefix: "Evento no calendário pendente de aprovação"
+            })
+        ]
 
     })
 
@@ -238,7 +245,13 @@ export const dayflowService = async (pedido: string) => {
                Em vez disso, passe-o no argumento 'meetingLink' da ferramenta send_email.
             
             Sempre confirme o envio na resposta final.
-        `.trim()
+        `.trim(),
+        middleware: [
+            humanInTheLoopMiddleware({
+                interruptOn: {send_email:true},
+                descriptionPrefix:"E-mail enviado aguardando aprovação"
+            })
+        ]
     })
 
 
@@ -307,21 +320,57 @@ export const dayflowService = async (pedido: string) => {
 
             Quando uma solicitação envolve várias ações, use várias ferramentas em sequência.
         
-        `
+        `.trim(),
+        checkpointer: new MemorySaver()
     })
 
-    const result = await supervisorAgent.invoke({
-        messages: [{ role: "user", content: pedido }]
-    })
+    const config = {configurable: {thread_id:"6"}}
+    const interrupts: any[] = []
+    
 
-    const lastMessage = result.messages[result.messages.length - 1]
-    return lastMessage.text
+    const result = await supervisorAgent.invoke(
+        {messages: [{ role: "user", content: pedido }]},
+        config
+    )
+
+    for (const message of result.messages){
+        console.log(message.toFormattedString() + '\n')
+    }
+
+    
+    if(result.__interrupt__){
+        for(const int of result.__interrupt__){
+            interrupts.push(int)
+        }
+    }
+
+    const resume: Record<string, any> = {}    
+
+    for (const interrupt of interrupts){
+        const actionRequest = interrupt.value.actionRequests[0]
+
+        if(actionRequest.name === 'send_email'){
+
+            const editedAction = {...actionRequest}
+            editedAction.args.subject = "Teste middlaware interação humana"
+            resume[interrupt.id] = {
+                decisions: [{type:"edit", editedAction}]
+            }
+        }
+        else{
+
+            resume[interrupt.id] = {decisions: [{type: "approve"}]}
+
+        }
+    }
+
+    const resumeStream = await supervisorAgent.invoke(
+        new Command({resume}),
+        config
+    )
 
 
-
-
-
-
-
+    return {int:interrupts, result:resumeStream}
+    // return result
 
 }
